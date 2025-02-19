@@ -166,7 +166,7 @@ func (app *Config) sendMail(w http.ResponseWriter, msg MailPayload) {
 		return
 	}
 
-	req.Header.Set("COntent-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 

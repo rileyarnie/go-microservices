@@ -1,11 +1,11 @@
 package main
 
 import (
-	"broker/event"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/rpc"
 )
 
 type RequestPayload struct {
@@ -56,7 +56,7 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 	case "auth":
 		app.authenticate(w, requestPayload.Auth)
 	case "log":
-		app.logEventViaRabbit(w, requestPayload.Log)
+		app.logEventViaRPC(w, requestPayload.Log)
 	case "mail":
 		app.sendMail(w, requestPayload.Mail)
 	default:
@@ -64,40 +64,40 @@ func (app *Config) HandleSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (app *Config) logItem(w http.ResponseWriter, entry LogPayload) {
-	jsonData, _ := json.MarshalIndent(entry, "", "\t")
+// func (app *Config) logItem(w http.ResponseWriter, entry LogPayload) {
+// 	jsonData, _ := json.MarshalIndent(entry, "", "\t")
 
-	logServiceURL := "http://logger-service/log"
+// 	logServiceURL := "http://logger-service/log"
 
-	request, err := http.NewRequest("POST", logServiceURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		app.errorJSON(w, err)
-		return
-	}
+// 	request, err := http.NewRequest("POST", logServiceURL, bytes.NewBuffer(jsonData))
+// 	if err != nil {
+// 		app.errorJSON(w, err)
+// 		return
+// 	}
 
-	request.Header.Set("Content-Type", "application/json")
+// 	request.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+// 	client := &http.Client{}
 
-	response, err := client.Do(request)
-	if err != nil {
-		app.errorJSON(w, err)
-		return
-	}
-	defer response.Body.Close()
+// 	response, err := client.Do(request)
+// 	if err != nil {
+// 		app.errorJSON(w, err)
+// 		return
+// 	}
+// 	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusAccepted {
-		app.errorJSON(w, err)
-		return
-	}
+// 	if response.StatusCode != http.StatusAccepted {
+// 		app.errorJSON(w, err)
+// 		return
+// 	}
 
-	var payload jsonResponse
-	payload.Error = false
-	payload.Message = "logged"
+// 	var payload jsonResponse
+// 	payload.Error = false
+// 	payload.Message = "logged"
 
-	app.writeJSON(w, http.StatusAccepted, payload)
+// 	app.writeJSON(w, http.StatusAccepted, payload)
 
-}
+// }
 
 // authenticate calls the authentication microservice and sends back the appropriate response
 func (app *Config) authenticate(w http.ResponseWriter, a AuthPayload) {
@@ -196,36 +196,72 @@ func (app *Config) sendMail(w http.ResponseWriter, msg MailPayload) {
 
 }
 
-func (app *Config) logEventViaRabbit(w http.ResponseWriter, l LogPayload) {
-	err := app.pushToQueue(l.Name, l.Data)
+// func (app *Config) logEventViaRabbit(w http.ResponseWriter, l LogPayload) {
+// 	err := app.pushToQueue(l.Name, l.Data)
+// 	if err != nil {
+// 		app.errorJSON(w, err)
+// 		return
+// 	}
+
+// 	var payload jsonResponse
+// 	payload.Error = false
+// 	payload.Message = "logged via RabbitMQ"
+
+// 	app.writeJSON(w, http.StatusAccepted, payload)
+// }
+
+// func (app *Config) pushToQueue(name, message string) error {
+// 	emmiter, err := event.NewEventEmitter(app.Rabbit)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	payload := LogPayload{
+// 		Name: name,
+// 		Data: message,
+// 	}
+
+// 	j, _ := json.MarshalIndent(&payload, "", "\t")
+
+// 	err = emmiter.Push(string(j), "log.INFO")
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	return nil
+// }
+
+type RPCPayload struct {
+	Name string
+	Data string
+}
+
+func (app *Config) logEventViaRPC(w http.ResponseWriter, l LogPayload) {
+	client, err := rpc.Dial("tcp", "logger-service:5001")
+
 	if err != nil {
 		app.errorJSON(w, err)
 		return
 	}
 
-	var payload jsonResponse
-	payload.Error = false
-	payload.Message = "logged via RabbitMQ"
+	rpcPayload := RPCPayload{
+		Name: l.Name,
+		Data: l.Data,
+	}
+
+	var result string
+
+	err = client.Call("RPCServer.LogInfo", rpcPayload, &result)
+
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: result,
+	}
 
 	app.writeJSON(w, http.StatusAccepted, payload)
-}
 
-func (app *Config) pushToQueue(name, message string) error {
-	emmiter, err := event.NewEventEmitter(app.Rabbit)
-	if err != nil {
-		return err
-	}
-	payload := LogPayload{
-		Name: name,
-		Data: message,
-	}
-
-	j, _ := json.MarshalIndent(&payload, "", "\t")
-
-	err = emmiter.Push(string(j), "log.INFO")
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
